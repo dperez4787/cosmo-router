@@ -18,8 +18,9 @@ SUBGRAPHS=(titles names ratings episodes crew akas principals)
 # their gcloud user identity, which Cloud Run accepts for invoker-role users.
 id_token() { # id_token <audience>
   if [ -n "${IMPERSONATE_SA:-}" ]; then
+    # No stderr suppression: a failed mint must be loud, not a silent exit 1.
     gcloud auth print-identity-token \
-      --impersonate-service-account "$IMPERSONATE_SA" --audiences "$1" 2>/dev/null
+      --impersonate-service-account "$IMPERSONATE_SA" --audiences "$1"
   else
     gcloud auth print-identity-token 2>/dev/null || true
   fi

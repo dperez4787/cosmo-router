@@ -26,6 +26,17 @@ resource "google_project_iam_member" "deploy_run_admin" {
   member  = "serviceAccount:${google_service_account.deploy.email}"
 }
 
+# The deploy workflow mints per-audience ID tokens as itself (subgraph
+# introspection in compose.sh, router smoke test). gcloud's
+# --impersonate-service-account path is self-impersonation via the IAM
+# credentials API, which needs an explicit tokenCreator grant — it is not
+# implied by WIF's workloadIdentityUser, nor even by roles/owner.
+resource "google_service_account_iam_member" "deploy_self_token_creator" {
+  service_account_id = google_service_account.deploy.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${google_service_account.deploy.email}"
+}
+
 # actAs on the runtime SA only (not project-wide serviceAccountUser)
 resource "google_service_account_iam_member" "deploy_act_as_runtime" {
   service_account_id = google_service_account.runtime.name

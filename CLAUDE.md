@@ -1,9 +1,9 @@
 # cosmo-router
 
 Custom Go build of the WunderGraph Cosmo router (standalone mode, no control
-plane) fronting the 7 imdb-federation Spring Boot subgraphs on Cloud Run.
-Purpose: custom modules — `requestlog` and `subgraphtoken` today, field-level
-authorization via a centralized policy service next.
+plane) fronting the 8 imdb-federation Spring Boot subgraphs on Cloud Run.
+Purpose: custom modules — `requestlog`, `subgraphtoken`, and `fieldauth`
+(field-level governance enforcing the imdb-policy-service bundle).
 
 ## Auth (two boundaries, two token types)
 
@@ -49,3 +49,15 @@ authorization via a centralized policy service next.
   by the linear-example stack; APIs are enabled by the imdb-federation stack.
 - The smoke test asserts the `X-Imdb-Router` header — it proves the custom
   module chain ran. Don't remove the header without replacing the assertion.
+- Field-level governance (`modules/fieldauth`): polls the imdb-policy-service
+  bundle (ETag, fail-static — last good bundle survives outages; before the
+  FIRST successful fetch it fails open and logs), walks each operation's
+  coordinates against `engineConfig.graphqlSchema` from the baked execution
+  config, and rejects violations with `PERMISSION_DENIED` (403). Roles come
+  from the JWT `roles` claim (policy-service persona tokens) or the bundle's
+  `principals` map (Google identities). `mode: log-only` is the rollout
+  switch. The governance smoke test asserts deny-without-role AND
+  allow-as-analyst — keep both sides.
+- The policy service JWKS entry in `authentication.jwt` means the router
+  won't start cleanly unless imdb-policy-service is reachable — deploy the
+  policy service before shipping router config changes that reference it.

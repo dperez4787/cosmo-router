@@ -28,6 +28,11 @@ authentication:
         audiences:
           - https://cosmo-router-dkuqnmldta-uc.a.run.app
           - 32555940559.apps.googleusercontent.com # gcloud CLI's fixed OAuth client id
+      # Persona tokens minted by the policy service (demo personas / UI playground).
+      - url: https://imdb-policy-service-dkuqnmldta-uc.a.run.app/.well-known/jwks.json
+        algorithms: [RS256]
+        audiences:
+          - imdb-router
 
 authorization:
   require_authentication: true
@@ -49,3 +54,10 @@ modules:
     header_value: cosmo-custom
   subgraphToken:
     enabled: true
+  # Field-level governance: enforces the imdb-policy-service bundle against
+  # every operation's schema coordinates. Roles come from the JWT's roles
+  # claim (persona tokens) or the bundle's principals map (Google identities).
+  fieldAuth:
+    policy_service_url: https://imdb-policy-service-dkuqnmldta-uc.a.run.app
+    poll_interval_seconds: 15
+    mode: reject # or log-only for rollout

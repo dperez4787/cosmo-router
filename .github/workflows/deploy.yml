@@ -104,3 +104,31 @@ jobs:
           echo "$RESP" | jq -e '.data.title.primaryTitle and .data.title.rating.averageRating and (.data.title.directors | length > 0) and (.errors == null)'
           grep -i 'x-imdb-router' /tmp/headers || { echo "custom module header missing"; exit 1; }
           echo "Federated smoke test OK (401 unauthenticated, 200 with ID token)"
+
+      - name: Smoke test (field-level governance)
+        run: |
+          URL=$(gcloud run services describe ${{ env.SERVICE }} \
+            --region "${{ env.REGION }}" --project "${{ env.PROJECT_ID }}" \
+            --format 'value(status.url)')
+          POLICY_URL=https://imdb-policy-service-dkuqnmldta-uc.a.run.app
+
+          # The deploy SA has no persona: a Google-signed token with no roles
+          # must be denied a governed field (Rating.numVotes)...
+          TOKEN=$(gcloud auth print-identity-token \
+            --impersonate-service-account "${{ secrets.DEPLOY_SA }}" --audiences "$URL")
+          DENIED=$(curl -s -D /tmp/gov-headers -X POST "$URL/graphql" \
+            -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" \
+            -d '{"query":"{ title(tconst: \"tt0944947\") { rating { numVotes } } }"}')
+          echo "$DENIED"
+          echo "$DENIED" | jq -e '.errors[0].extensions.code == "PERMISSION_DENIED" and (.errors[0].extensions.deniedFields | index("Rating.numVotes"))'
+          grep -i 'x-imdb-policy-revision' /tmp/gov-headers || { echo "policy revision header missing"; exit 1; }
+
+          # ...while an analyst persona token minted by the policy service passes.
+          PERSONA=$(curl -sf -X POST "$POLICY_URL/v1/token" \
+            -H 'Content-Type: application/json' -d '{"persona":"analyst"}' | jq -r .token)
+          ALLOWED=$(curl -sf -X POST "$URL/graphql" \
+            -H 'Content-Type: application/json' -H "Authorization: Bearer $PERSONA" \
+            -d '{"query":"{ title(tconst: \"tt0944947\") { rating { numVotes } } }"}')
+          echo "$ALLOWED"
+          echo "$ALLOWED" | jq -e '.data.title.rating.numVotes and (.errors == null)'
+          echo "Governance smoke test OK (denied without role, allowed as analyst)"

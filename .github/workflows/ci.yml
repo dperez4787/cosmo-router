@@ -16,10 +16,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Build and vet
+      - name: Build, vet, test
         run: |
           go build ./...
           go vet ./...
+          go test ./...
 
   compose-check:
     runs-on: ubuntu-latest

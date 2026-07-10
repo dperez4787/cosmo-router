@@ -10,6 +10,7 @@ require (
 )
 
 require (
+	github.com/wundergraph/graphql-go-tools/v2 v2.9.2
 	golang.org/x/oauth2 v0.36.0
 	google.golang.org/api v0.288.0
 )
@@ -140,7 +141,6 @@ require (
 	github.com/vbatts/tar-split v0.12.1 // indirect
 	github.com/wundergraph/astjson v1.1.0 // indirect
 	github.com/wundergraph/go-arena v1.3.0 // indirect
-	github.com/wundergraph/graphql-go-tools/v2 v2.9.2 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect

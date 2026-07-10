@@ -1,0 +1,92 @@
+# Deploys the custom Cosmo router to Cloud Run.
+#
+# Two things trigger a rollout:
+#   - push to main (router code / config changes)
+#   - repository_dispatch "subgraphs-updated" or manual workflow_dispatch
+#     (schema changes in imdb-federation: recompose against the live SDLs
+#     and ship a new image — the execution config is baked into the image)
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  repository_dispatch:
+    types: [subgraphs-updated]
+
+concurrency: deploy-main
+
+env:
+  PROJECT_ID: project-d60a83c1-2c60-4d51-ad0
+  REGION: us-central1
+  AR_REPO: cosmo-router
+  SERVICE: cosmo-router
+  RUNTIME_SA: cosmorouter-run@project-d60a83c1-2c60-4d51-ad0.iam.gserviceaccount.com
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Compose supergraph from deployed subgraphs
+        run: ./scripts/compose.sh
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.DEPLOY_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/router:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE }} \
+            --image "${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/router:${{ github.sha }}" \
+            --region "${{ env.REGION }}" \
+            --project "${{ env.PROJECT_ID }}" \
+            --service-account "${{ env.RUNTIME_SA }}" \
+            --allow-unauthenticated \
+            --port 3002 \
+            --min-instances 0 \
+            --max-instances 2 \
+            --memory 512Mi \
+            --cpu 1 \
+            --cpu-boost \
+            --quiet
+
+      - name: Smoke test (federated query across 3 subgraphs)
+        run: |
+          URL=$(gcloud run services describe ${{ env.SERVICE }} \
+            --region "${{ env.REGION }}" --project "${{ env.PROJECT_ID }}" \
+            --format 'value(status.url)')
+          echo "Router URL: $URL"
+          RESP=$(curl -sf --retry 3 --retry-all-errors --max-time 120 -D /tmp/headers \
+            -X POST "$URL/graphql" \
+            -H 'Content-Type: application/json' \
+            -d '{"query":"{ title(tconst: \"tt0944947\") { primaryTitle rating { averageRating } directors { primaryName } } }"}')
+          echo "$RESP"
+          echo "$RESP" | jq -e '.data.title.primaryTitle and .data.title.rating.averageRating and (.data.title.directors | length > 0) and (.errors == null)'
+          grep -i 'x-imdb-router' /tmp/headers || { echo "custom module header missing"; exit 1; }
+          echo "Federated smoke test OK"

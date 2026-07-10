@@ -1,0 +1,28 @@
+# Cosmo router in standalone (no control plane) mode: executes the statically
+# composed config produced by `wgc router compose` (baked into the image by the
+# Dockerfile). Schema updates therefore ship as a new image via deploy.yml.
+listen_addr: 0.0.0.0:3002
+log_level: info
+dev_mode: false
+playground_enabled: true
+introspection_enabled: true
+
+execution_config:
+  file:
+    path: /config/execution-config.json
+
+# Standalone router: nothing to export telemetry to (yet).
+telemetry:
+  tracing:
+    enabled: false
+  metrics:
+    otlp:
+      enabled: false
+    prometheus:
+      enabled: false
+graphql_metrics:
+  enabled: false
+
+modules:
+  requestLog:
+    header_value: cosmo-custom

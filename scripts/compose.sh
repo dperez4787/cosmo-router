@@ -10,7 +10,7 @@ cd "$(dirname "$0")/.."
 
 WGC_VERSION="0.129.0"
 BASE_URL_PATTERN="https://imdb-subgraph-%s-dkuqnmldta-uc.a.run.app/graphql"
-SUBGRAPHS=(titles names ratings episodes crew akas principals)
+SUBGRAPHS=(titles names ratings episodes crew akas principals orchestrator)
 
 # The subgraphs allow only IAM-authenticated invokers, so introspection needs
 # an identity with roles/run.invoker. CI sets IMPERSONATE_SA (the deploy SA,

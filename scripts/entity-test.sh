@@ -87,4 +87,18 @@ q "4-hop chain        (title.directors.credits.title.primaryTitle)" \
   "{ title(tconst: \"$TCONST\") { directors { primaryName credits(limit: 1) { title { primaryTitle } } } } }" \
   '[.data.title.directors[].credits[]?.title.primaryTitle] | any(. != null)'
 
+# --- Orchestrator: search returns Title/Name stubs (resolvable: false there),
+#     so selecting owned fields proves router hydration from titles/ratings/names ---
+q "Search -> titles    (searchTitles stub hydration + popularity rank)" \
+  "{ searchTitles(filter: {genresAny: [\"Drama\"], titleTypes: [\"tvSeries\"], votesFrom: 100000}, sort: POPULARITY_DESC, limit: 3) { items { tconst primaryTitle rating { numVotes } } } }" \
+  '[.data.searchTitles.items[].primaryTitle] | any(. != null)'
+
+q "Search -> names     (searchNames inTitles + hydration)" \
+  "{ searchNames(filter: {inTitles: [\"$TCONST\"]}, limit: 3) { items { nconst primaryName } } }" \
+  '[.data.searchNames.items[].primaryName] | any(. != null)'
+
+q "Search info         (derived data freshness)" \
+  "{ searchInfo { rebuiltAt titleCount nameCount } }" \
+  '.data.searchInfo.titleCount != null'
+
 [ "$FAIL" -eq 0 ] && echo "All entity resolvers OK" || { echo "Entity resolver failures"; exit 1; }

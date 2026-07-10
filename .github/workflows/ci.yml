@@ -23,6 +23,11 @@ jobs:
 
   compose-check:
     runs-on: ubuntu-latest
+    # WIF for subgraph introspection: the subgraphs only accept IAM-authenticated
+    # invokers. Fork PRs lack id-token permission and will skip cleanly at auth.
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -30,5 +35,14 @@ jobs:
         with:
           node-version: "20"
 
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.DEPLOY_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
       - name: Compose supergraph from deployed subgraphs
         run: ./scripts/compose.sh
+        env:
+          IMPERSONATE_SA: ${{ secrets.DEPLOY_SA }}

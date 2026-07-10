@@ -11,6 +11,27 @@ execution_config:
   file:
     path: /config/execution-config.json
 
+# Client -> router boundary: every operation needs a Google-signed ID token.
+# Same enforcement model as linear-example's auth gate, with zero custom code.
+# The router -> subgraph boundary is Cloud Run IAM (modules.subgraphToken).
+authentication:
+  jwt:
+    jwks:
+      # Firebase ID tokens — the linear-example login mechanism (Google sign-in).
+      - url: https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com
+        algorithms: [RS256]
+        audiences:
+          - project-d60a83c1-2c60-4d51-ad0
+      # Google OIDC ID tokens — service accounts (CI smoke tests) and gcloud users.
+      - url: https://www.googleapis.com/oauth2/v3/certs
+        algorithms: [RS256]
+        audiences:
+          - https://cosmo-router-dkuqnmldta-uc.a.run.app
+          - 32555940559.apps.googleusercontent.com # gcloud CLI's fixed OAuth client id
+
+authorization:
+  require_authentication: true
+
 # Standalone router: nothing to export telemetry to (yet).
 telemetry:
   tracing:
@@ -26,3 +47,5 @@ graphql_metrics:
 modules:
   requestLog:
     header_value: cosmo-custom
+  subgraphToken:
+    enabled: true

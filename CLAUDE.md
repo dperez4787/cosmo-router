@@ -2,16 +2,32 @@
 
 Custom Go build of the WunderGraph Cosmo router (standalone mode, no control
 plane) fronting the 7 imdb-federation Spring Boot subgraphs on Cloud Run.
-Purpose: custom modules — `requestlog` today, field-level authorization via a
-centralized policy service next.
+Purpose: custom modules — `requestlog` and `subgraphtoken` today, field-level
+authorization via a centralized policy service next.
+
+## Auth (two boundaries, two token types)
+
+- Client → router: Google-signed ID tokens, verified by stock
+  `authentication.jwt` JWKS config in `config/config.yaml` (Firebase tokens for
+  the linear-example login, Google OIDC for gcloud users / service accounts —
+  audience allowlist includes the router URL and gcloud's fixed client id).
+  Unauthenticated operations get 401 (`authorization.require_authentication`).
+- Router → subgraphs: Cloud Run IAM. The subgraphs have no `allUsers` invoker;
+  the `subgraphtoken` module attaches per-audience ID tokens minted as the
+  runtime SA (`cosmorouter-run`, granted `roles/run.invoker` in
+  imdb-federation's `infra/subgraph_invokers.tf` — NOT this repo's Terraform).
+  Without ADC (plain local runs) it logs a warning and forwards unsigned.
 
 ## Commands
 
 - Compose + build: `./scripts/compose.sh && docker build -t cosmo-router .`
-  (compose fetches SDL from the LIVE deployed subgraphs; needs network + jq)
+  (introspects the LIVE subgraphs — needs run.invoker: your gcloud user
+  identity locally, `IMPERSONATE_SA=<deploy-sa>` in CI; plus network + jq)
 - Run locally: `docker run --rm -p 3002:3002 cosmo-router` — GraphiQL on
-  http://localhost:3002, routes to the deployed Cloud Run subgraphs
-- Go checks (CI does this; no local Go assumed): `go build ./... && go vet ./...`
+  http://localhost:3002; call with
+  `-H "Authorization: Bearer $(gcloud auth print-identity-token)"`
+- Test all entity resolvers: `./scripts/entity-test.sh [router-url]`
+- Go checks: `go build ./... && go vet ./...`
 - Recompose/redeploy after subgraph schema changes: `gh workflow run deploy.yml`
 
 ## Rules

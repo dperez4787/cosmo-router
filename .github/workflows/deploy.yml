@@ -36,15 +36,19 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Compose supergraph from deployed subgraphs
-        run: ./scripts/compose.sh
-
       - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.DEPLOY_SA }}
 
       - uses: google-github-actions/setup-gcloud@v2
+
+      # After gcloud auth: introspecting the IAM-locked subgraphs needs
+      # per-audience ID tokens minted as the deploy SA.
+      - name: Compose supergraph from deployed subgraphs
+        run: ./scripts/compose.sh
+        env:
+          IMPERSONATE_SA: ${{ secrets.DEPLOY_SA }}
 
       - name: Configure docker for Artifact Registry
         run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
@@ -82,11 +86,21 @@ jobs:
             --region "${{ env.REGION }}" --project "${{ env.PROJECT_ID }}" \
             --format 'value(status.url)')
           echo "Router URL: $URL"
+
+          # Unauthenticated operations must be rejected at the router boundary.
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' --retry 3 --retry-all-errors --max-time 120 \
+            -X POST "$URL/graphql" -H 'Content-Type: application/json' \
+            -d '{"query":"{ __typename }"}')
+          [ "$CODE" = "401" ] || { echo "expected 401 without token, got $CODE"; exit 1; }
+
+          TOKEN=$(gcloud auth print-identity-token \
+            --impersonate-service-account "${{ secrets.DEPLOY_SA }}" --audiences "$URL")
           RESP=$(curl -sf --retry 3 --retry-all-errors --max-time 120 -D /tmp/headers \
             -X POST "$URL/graphql" \
             -H 'Content-Type: application/json' \
+            -H "Authorization: Bearer $TOKEN" \
             -d '{"query":"{ title(tconst: \"tt0944947\") { primaryTitle rating { averageRating } directors { primaryName } } }"}')
           echo "$RESP"
           echo "$RESP" | jq -e '.data.title.primaryTitle and .data.title.rating.averageRating and (.data.title.directors | length > 0) and (.errors == null)'
           grep -i 'x-imdb-router' /tmp/headers || { echo "custom module header missing"; exit 1; }
-          echo "Federated smoke test OK"
+          echo "Federated smoke test OK (401 unauthenticated, 200 with ID token)"

@@ -101,4 +101,8 @@ q "Search info         (derived data freshness)" \
   "{ searchInfo { rebuiltAt titleCount nameCount } }" \
   '.data.searchInfo.titleCount != null'
 
+q "Unified search      (union hydration across kinds)" \
+  "{ search(query: \"game of thrones\", limit: 5) { __typename ... on Title { primaryTitle } ... on Name { primaryName } } }" \
+  '.data.search | length > 0'
+
 [ "$FAIL" -eq 0 ] && echo "All entity resolvers OK" || { echo "Entity resolver failures"; exit 1; }

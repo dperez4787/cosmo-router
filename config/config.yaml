@@ -37,6 +37,18 @@ authentication:
 authorization:
   require_authentication: true
 
+# imdb-browser's SPA calls the router cross-origin with an Authorization
+# header — the default allow_headers list lacks it. Wildcard origins need
+# allow_credentials off (Authorization is a header, not CORS "credentials").
+# Governance headers are exposed by the fieldAuth module itself (the pinned
+# router's CORS config has no expose_headers option).
+cors:
+  enabled: true
+  allow_origins: ["*"]
+  allow_methods: [HEAD, GET, POST]
+  allow_headers: [Origin, Content-Length, Content-Type, Authorization]
+  allow_credentials: false
+
 # Standalone router: nothing to export telemetry to (yet).
 telemetry:
   tracing:
@@ -60,4 +72,6 @@ modules:
   fieldAuth:
     policy_service_url: https://imdb-policy-service-dkuqnmldta-uc.a.run.app
     poll_interval_seconds: 15
-    mode: reject # or log-only for rollout
+    # redact: strip denied fields, report in extensions.governance (default;
+    # keeps naive clients working). reject: fail the operation. log-only: rollout.
+    mode: redact

@@ -19,7 +19,7 @@ func TestRealComposedSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	coords, err := extractCoordinates(`
+	sels, err := extractSelections(`
 		query Smoke($id: ID!) {
 			title(tconst: $id) {
 				primaryTitle
@@ -31,6 +31,7 @@ func TestRealComposedSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	coords := uniqueCoordinates(sels)
 
 	want := map[string]bool{
 		"Query.title":          true,

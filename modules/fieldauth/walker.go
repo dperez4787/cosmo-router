@@ -8,10 +8,19 @@ import (
 	"strings"
 
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/ast"
+	"github.com/wundergraph/graphql-go-tools/v2/pkg/astnormalization"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/astparser"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/asttransform"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/astvisitor"
 )
+
+// Selection is one selected field: its schema coordinate (Type.field) for
+// policy decisions, and its response path (alias-aware keys from the data
+// root) for redaction. The same coordinate can appear under many paths.
+type Selection struct {
+	Coordinate string
+	Path       []string
+}
 
 // loadClientSchema pulls the composed client schema out of the same
 // execution config the router executes (engineConfig.graphqlSchema), so the
@@ -48,19 +57,27 @@ func parseSchema(sdl string) (*ast.Document, error) {
 	return &doc, nil
 }
 
-// extractCoordinates returns the unique Type.field schema coordinates the
-// operation selects, resolved via a typed walk of the (normalized) operation
-// against the client schema — fragments and inline spreads resolve to their
-// type conditions. Introspection meta fields (__typename, __schema, __type)
-// are skipped: they reveal shape, not data.
-func extractCoordinates(operation string, schema *ast.Document) ([]string, error) {
+// extractSelections resolves the (normalized) operation's fields via a typed
+// walk against the client schema. Fragments and inline spreads resolve to
+// their type conditions; response paths are built from field ancestors only,
+// so fragment path segments never pollute them. Introspection meta fields
+// (__typename, __schema, ...) are skipped: they reveal shape, not data.
+func extractSelections(operation string, schema *ast.Document) ([]Selection, error) {
 	opDoc, report := astparser.ParseGraphqlDocumentString(operation)
 	if report.HasErrors() {
 		return nil, fmt.Errorf("parsing operation: %s", report.Error())
 	}
+	// Inline named fragments before walking: response paths are built from
+	// field ancestors, and only an inlined operation carries the spread
+	// site's fields as ancestors. (Also makes us independent of how much
+	// normalization the router applied to Content().)
+	astnormalization.NewNormalizer(true, false).NormalizeOperation(&opDoc, schema, &report)
+	if report.HasErrors() {
+		return nil, fmt.Errorf("normalizing operation: %s", report.Error())
+	}
 
 	walker := astvisitor.NewWalker(48)
-	visitor := &coordinateVisitor{
+	visitor := &selectionVisitor{
 		walker:    &walker,
 		operation: &opDoc,
 		schema:    schema,
@@ -71,23 +88,31 @@ func extractCoordinates(operation string, schema *ast.Document) ([]string, error
 	if report.HasErrors() {
 		return nil, fmt.Errorf("walking operation: %s", report.Error())
 	}
+	return visitor.selections, nil
+}
 
-	coordinates := make([]string, 0, len(visitor.seen))
-	for coordinate := range visitor.seen {
-		coordinates = append(coordinates, coordinate)
+func uniqueCoordinates(selections []Selection) []string {
+	set := map[string]bool{}
+	for _, s := range selections {
+		set[s.Coordinate] = true
 	}
-	sort.Strings(coordinates)
-	return coordinates, nil
+	out := make([]string, 0, len(set))
+	for coordinate := range set {
+		out = append(out, coordinate)
+	}
+	sort.Strings(out)
+	return out
 }
 
-type coordinateVisitor struct {
-	walker    *astvisitor.Walker
-	operation *ast.Document
-	schema    *ast.Document
-	seen      map[string]bool
+type selectionVisitor struct {
+	walker     *astvisitor.Walker
+	operation  *ast.Document
+	schema     *ast.Document
+	seen       map[string]bool
+	selections []Selection
 }
 
-func (v *coordinateVisitor) EnterField(ref int) {
+func (v *selectionVisitor) EnterField(ref int) {
 	fieldName := v.operation.FieldNameString(ref)
 	if strings.HasPrefix(fieldName, "__") {
 		return
@@ -99,5 +124,23 @@ func (v *coordinateVisitor) EnterField(ref int) {
 	if typeName == "" || strings.HasPrefix(typeName, "__") {
 		return
 	}
-	v.seen[typeName+"."+fieldName] = true
+
+	// Response path = alias-or-name of every FIELD ancestor + this field.
+	// Non-field ancestors (operation root, fragments, type conditions) are
+	// not response keys and are skipped.
+	var path []string
+	for _, ancestor := range v.walker.Ancestors {
+		if ancestor.Kind == ast.NodeKindField {
+			path = append(path, v.operation.FieldAliasOrNameString(ancestor.Ref))
+		}
+	}
+	path = append(path, v.operation.FieldAliasOrNameString(ref))
+
+	coordinate := typeName + "." + fieldName
+	key := coordinate + "|" + strings.Join(path, ".")
+	if v.seen[key] {
+		return
+	}
+	v.seen[key] = true
+	v.selections = append(v.selections, Selection{Coordinate: coordinate, Path: path})
 }

@@ -112,23 +112,32 @@ jobs:
             --format 'value(status.url)')
           POLICY_URL=https://imdb-policy-service-dkuqnmldta-uc.a.run.app
 
-          # The deploy SA has no persona: a Google-signed token with no roles
-          # must be denied a governed field (Rating.numVotes)...
+          # The deploy SA has no persona: transparent redact mode must return
+          # partial data — governed field ABSENT, no errors array (clients
+          # like graphql-request throw on errors), redaction reported in
+          # extensions.governance.
           TOKEN=$(gcloud auth print-identity-token \
             --impersonate-service-account "${{ secrets.DEPLOY_SA }}" --audiences "$URL")
-          DENIED=$(curl -s -D /tmp/gov-headers -X POST "$URL/graphql" \
-            -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" \
-            -d '{"query":"{ title(tconst: \"tt0944947\") { rating { numVotes } } }"}')
-          echo "$DENIED"
-          echo "$DENIED" | jq -e '.errors[0].extensions.code == "PERMISSION_DENIED" and (.errors[0].extensions.deniedFields | index("Rating.numVotes"))'
+          Q='{"query":"{ title(tconst: \"tt0944947\") { primaryTitle rating { averageRating numVotes } } }"}'
+          REDACTED=$(curl -sf -D /tmp/gov-headers -X POST "$URL/graphql" \
+            -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" -d "$Q")
+          echo "$REDACTED"
+          echo "$REDACTED" | jq -e '
+            .errors == null
+            and .data.title.primaryTitle
+            and .data.title.rating.averageRating
+            and (.data.title.rating | has("numVotes") | not)
+            and (.extensions.governance.redactedFields | index("Rating.numVotes"))'
           grep -i 'x-imdb-policy-revision' /tmp/gov-headers || { echo "policy revision header missing"; exit 1; }
+          grep -i 'access-control-expose-headers' /tmp/gov-headers || { echo "expose header missing"; exit 1; }
 
-          # ...while an analyst persona token minted by the policy service passes.
+          # ...while an analyst persona token minted by the policy service
+          # sees the value, with the resolved roles surfaced in a header.
           PERSONA=$(curl -sf -X POST "$POLICY_URL/v1/token" \
             -H 'Content-Type: application/json' -d '{"persona":"analyst"}' | jq -r .token)
-          ALLOWED=$(curl -sf -X POST "$URL/graphql" \
-            -H 'Content-Type: application/json' -H "Authorization: Bearer $PERSONA" \
-            -d '{"query":"{ title(tconst: \"tt0944947\") { rating { numVotes } } }"}')
+          ALLOWED=$(curl -sf -D /tmp/an-headers -X POST "$URL/graphql" \
+            -H 'Content-Type: application/json' -H "Authorization: Bearer $PERSONA" -d "$Q")
           echo "$ALLOWED"
-          echo "$ALLOWED" | jq -e '.data.title.rating.numVotes and (.errors == null)'
-          echo "Governance smoke test OK (denied without role, allowed as analyst)"
+          echo "$ALLOWED" | jq -e '.data.title.rating.numVotes and (.errors == null) and (.extensions.governance == null)'
+          grep -i 'x-imdb-roles.*analyst' /tmp/an-headers || { echo "roles header missing"; exit 1; }
+          echo "Governance smoke test OK (redacted without role, full data as analyst)"

@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/oauth2"
+	"google.golang.org/api/idtoken"
 )
 
 // Bundle mirrors imdb-policy-service's compiled policy artifact. Additive
@@ -35,6 +37,11 @@ type poller struct {
 	interval time.Duration
 	client   *http.Client
 	logger   *zap.Logger
+	// Google ID token (audience = policy service) identifying this router:
+	// the policy service serves the principals map only to allowlisted
+	// callers. nil without ADC (plain local runs) — the bundle still serves,
+	// minus principals.
+	tokens oauth2.TokenSource
 
 	current atomic.Pointer[Bundle]
 	etag    string
@@ -43,11 +50,18 @@ type poller struct {
 }
 
 func newPoller(url string, interval time.Duration, logger *zap.Logger) *poller {
+	tokens, err := idtoken.NewTokenSource(context.Background(), url)
+	if err != nil {
+		logger.Info("fieldAuth: no ID token source; bundle fetches are anonymous "+
+			"(principals map may be withheld)", zap.Error(err))
+		tokens = nil
+	}
 	return &poller{
 		url:      url,
 		interval: interval,
 		client:   &http.Client{Timeout: 10 * time.Second},
 		logger:   logger,
+		tokens:   tokens,
 		done:     make(chan struct{}),
 	}
 }
@@ -104,6 +118,13 @@ func (p *poller) fetchOnce(ctx context.Context) error {
 	}
 	if p.etag != "" {
 		req.Header.Set("If-None-Match", p.etag)
+	}
+	if p.tokens != nil {
+		if tok, err := p.tokens.Token(); err == nil {
+			req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
+		} else {
+			p.logger.Warn("fieldAuth: ID token mint failed, fetching bundle anonymously", zap.Error(err))
+		}
 	}
 	resp, err := p.client.Do(req)
 	if err != nil {

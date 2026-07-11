@@ -181,7 +181,12 @@ func (m *Module) serveRedacted(ctx core.RequestContext, next http.Handler,
 
 	real := ctx.ResponseWriter()
 	recorder := &bufferingWriter{header: real.Header()}
-	next.ServeHTTP(recorder, ctx.Request())
+	// Buffered redaction needs an identity-encoded body: never let the
+	// engine compress what we must parse. (Redacted responses are small;
+	// losing gzip on this path is an acceptable trade.)
+	request := ctx.Request()
+	request.Header.Del("Accept-Encoding")
+	next.ServeHTTP(recorder, request)
 
 	if recorder.status != http.StatusOK {
 		// Auth/validation errors carry no governed data; forward untouched.

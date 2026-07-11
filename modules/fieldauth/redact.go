@@ -20,7 +20,10 @@ func redactBody(body []byte, paths [][]string, redacted []string, roles []string
 	}
 	data, ok := doc["data"].(map[string]any)
 	if !ok {
-		return nil, false
+		// data is null/absent (an execution error response): it carries no
+		// governed data, so forward it untouched — masking a subgraph error
+		// as a governance denial misleads every role-less caller.
+		return body, true
 	}
 	for _, path := range paths {
 		removePath(data, path)

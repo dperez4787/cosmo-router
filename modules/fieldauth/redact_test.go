@@ -76,7 +76,18 @@ func TestUnparseableBodyFailsClosed(t *testing.T) {
 	if _, ok := redactBody([]byte("<html>nope"), [][]string{{"a"}}, nil, nil, 1); ok {
 		t.Fatal("must fail closed on non-JSON")
 	}
-	if _, ok := redactBody([]byte(`{"errors":[{"message":"x"}]}`), [][]string{{"a"}}, nil, nil, 1); ok {
-		t.Fatal("must fail closed without a data map")
+}
+
+func TestErrorResponseWithNullDataPassesThroughUntouched(t *testing.T) {
+	// A subgraph failure (data null) carries no governed data — masking it
+	// as a governance denial would disguise every backend error as a
+	// permissions problem for role-less callers.
+	body := []byte(`{"errors":[{"message":"Failed to fetch from Subgraph 'orchestrator'."}],"data":null}`)
+	out, ok := redactBody(body, [][]string{{"hits", "rating", "numVotes"}}, []string{"Rating.numVotes"}, nil, 8)
+	if !ok {
+		t.Fatal("error responses must pass through, not fail closed")
+	}
+	if string(out) != string(body) {
+		t.Fatalf("error response must be untouched: %s", out)
 	}
 }

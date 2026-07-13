@@ -5,6 +5,15 @@ Custom [WunderGraph Cosmo](https://cosmo-docs.wundergraph.com/) router build for
 router Go module plus this repo's custom modules. The first module (`requestlog`) exists to
 prove the custom-module pipeline; the real payload — field-level authorization backed by a
 centralized policy service — lands as the next module on the same scaffolding.
+## Live UIs
+
+Every user-facing surface in this system, live:
+
+| Surface | URL |
+|---|---|
+| **Marquee** — the IMDb browser | https://dfp-imdb-browser.web.app/titles |
+| **IMDb Graph Governance** — field-level policy control plane | https://imdb-policy-service-dkuqnmldta-uc.a.run.app/ |
+| **linear-example** — records app + the engineering blog | https://project-d60a83c1-2c60-4d51-ad0.web.app/ · [blog](https://project-d60a83c1-2c60-4d51-ad0.web.app/blog) |
 
 ## Architecture
 
